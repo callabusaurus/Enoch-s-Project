@@ -1,26 +1,35 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // ✅ Add this block anywhere inside the object (top or bottom is fine)
+  // ✅ Allow deployment even with TS errors
   typescript: {
     ignoreBuildErrors: true,
   },
 
-  // Mark pdf-parse and related packages as server-only externals
+  // ✅ Build only API routes (skip frontend pages)
+  pageExtensions: ["api.ts", "api.tsx", "route.ts", "route.tsx"],
+
+  // ✅ Existing experimental config for server-only packages
   experimental: {
-    serverExternalPackages: ['pdf-parse', 'pdfjs-dist', 'canvas'],
+    serverExternalPackages: ["pdf-parse", "pdfjs-dist", "canvas"],
   },
   
   webpack: (config, { isServer }) => {
     if (isServer) {
       const existingExternals = config.externals || [];
       config.externals = [
-        ...(Array.isArray(existingExternals) ? existingExternals : [existingExternals]),
+        ...(Array.isArray(existingExternals)
+          ? existingExternals
+          : [existingExternals]),
         ({ request }, callback) => {
-          if (request === 'pdf-parse' || request === 'pdfjs-dist' || request === 'canvas') {
+          if (
+            request === "pdf-parse" ||
+            request === "pdfjs-dist" ||
+            request === "canvas"
+          ) {
             return callback(null, `commonjs ${request}`);
           }
           callback();
-        }
+        },
       ];
 
       config.resolve.alias = {
@@ -33,4 +42,5 @@ const nextConfig = {
 };
 
 module.exports = nextConfig;
+
 
