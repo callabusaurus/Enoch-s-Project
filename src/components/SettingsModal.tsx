@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { X, Bell, Palette, Shield, Lock, User as UserIcon, Settings as SettingsIcon, Coins } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Bell, Palette, Shield, Lock, User as UserIcon, Coins, X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "./ui/dialog";
 import { Switch } from "./ui/switch";
@@ -17,21 +18,214 @@ interface SettingsModalProps {
 }
 
 const tabs = [
-  { id: "general", label: "General", icon: SettingsIcon },
-  { id: "notifications", label: "Notifications", icon: Bell },
   { id: "personalization", label: "Personalization", icon: Palette },
   { id: "credits", label: "Credits", icon: Coins },
-  { id: "data", label: "Data Controls", icon: Shield },
-  { id: "security", label: "Security", icon: Lock },
   { id: "account", label: "Account", icon: UserIcon },
 ];
 
-export function SettingsModal({ open, onClose, initialTab = "general" }: SettingsModalProps) {
+// Payment Modal Component
+interface PaymentModalProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+function PaymentModal({ open, onClose }: PaymentModalProps) {
+  if (typeof window === 'undefined') return null;
+  
+  return createPortal(
+    <AnimatePresence>
+      {open && (
+        <>
+          {/* Backdrop - Fully opaque */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-50"
+            style={{
+              backgroundColor: '#000000',
+              opacity: 1,
+            }}
+            onClick={onClose}
+          />
+          
+          {/* Modal */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div 
+              className="bg-white dark:bg-[#181818] payment-modal-bg border border-gray-200 dark:border-[#2A2A2A] payment-modal-border rounded-xl shadow-xl w-full max-w-md p-6"
+            >
+              <style>{`
+                @media (prefers-color-scheme: light), :not(.dark) {
+                  .payment-modal-text-primary {
+                    color: rgb(17, 24, 39) !important;
+                  }
+                  .payment-modal-text-secondary {
+                    color: rgb(75, 85, 99) !important;
+                  }
+                  .payment-modal-bg {
+                    background-color: rgb(255, 255, 255) !important;
+                  }
+                  .payment-modal-border {
+                    border-color: rgb(229, 231, 235) !important;
+                  }
+                }
+                .dark .payment-modal-text-primary {
+                  color: #EAEAEA !important;
+                }
+                .dark .payment-modal-text-secondary {
+                  color: #A0A0A0 !important;
+                }
+                .dark .payment-modal-bg {
+                  background-color: #181818 !important;
+                }
+                .dark .payment-modal-border {
+                  border-color: #2A2A2A !important;
+                }
+              `}</style>
+              <div className="flex justify-end mb-4">
+                <button
+                  onClick={onClose}
+                  className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="text-center mb-6">
+                <div className="text-4xl mb-4">💳</div>
+                <p className="payment-modal-text-primary text-lg font-medium mb-2">
+                  Payments are coming soon!
+                </p>
+                <p className="payment-modal-text-secondary text-sm">
+                  We're currently working on enabling Razorpay integration. Please hold on 🙂
+                </p>
+              </div>
+              
+              <button
+                onClick={onClose}
+                className="w-full py-2.5 px-4 bg-gray-900 dark:bg-gray-700 hover:bg-gray-800 dark:hover:bg-gray-600 text-white rounded-lg font-medium transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>,
+    document.body
+  );
+}
+
+// Confirm Delete Modal Component (same portal/animation pattern as PaymentModal)
+interface ConfirmDeleteModalProps {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}
+
+function ConfirmDeleteModal({ open, onClose, onConfirm }: ConfirmDeleteModalProps) {
+  if (typeof window === 'undefined') return null;
+  
+  return createPortal(
+    <AnimatePresence>
+      {open && (
+        <>
+          {/* Backdrop */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-50"
+            style={{ backgroundColor: '#000000' }}
+            onClick={onClose}
+          />
+
+          {/* Modal */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            onClick={(e) => e.stopPropagation()}
+            style={{ zIndex: 60 }}
+          >
+            <div 
+              className="bg-white dark:bg-[#181818] confirm-modal-bg border border-gray-200 dark:border-[#2A2A2A] confirm-modal-border rounded-xl shadow-xl w-full max-w-lg p-6"
+            >
+              <style>{`
+                @media (prefers-color-scheme: light), :not(.dark) {
+                  .confirm-modal-text-primary { color: rgb(17, 24, 39) !important; }
+                  .confirm-modal-text-secondary { color: rgb(75, 85, 99) !important; }
+                  .confirm-modal-bg { background-color: rgb(255, 255, 255) !important; }
+                  .confirm-modal-border { border-color: rgb(229, 231, 235) !important; }
+                }
+                .dark .confirm-modal-text-primary { color: #EAEAEA !important; }
+                .dark .confirm-modal-text-secondary { color: #A0A0A0 !important; }
+                .dark .confirm-modal-bg { background-color: #181818 !important; }
+                .dark .confirm-modal-border { border-color: #2A2A2A !important; }
+              `}</style>
+              <div className="flex justify-end mb-4">
+                <button
+                  onClick={onClose}
+                  className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="text-center mb-6">
+                <div className="text-4xl mb-4">⚠️</div>
+                <p className="text-lg font-medium confirm-modal-text-primary mb-2">
+                  Are you sure you want to delete your account?
+                </p>
+                <p className="text-sm confirm-modal-text-secondary">
+                  This action is permanent.
+                </p>
+              </div>
+
+              <div className="mt-8 flex items-center justify-between w-full">
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-[#2A2A2A] hover:bg-gray-200 dark:hover:bg-[#1E1E1E] text-gray-900 dark:text-[#EAEAEA]"
+                >
+                  No
+                </button>
+                <button
+                  onClick={onConfirm}
+                  aria-label="Confirm account deletion"
+                  style={{ backgroundColor: '#dc2626' }}
+                  className="px-5 py-2.5 rounded-xl font-semibold text-white shadow-md border border-red-700/60 hover:shadow-lg active:scale-[0.99] transition-all select-none z-[61] focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#181818]"
+                >
+                  Yes, delete
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>,
+    document.body
+  );
+}
+
+export function SettingsModal({ open, onClose, initialTab = "personalization" }: SettingsModalProps) {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState(initialTab);
   const [credits, setCredits] = useState(0);
   const [atlasCredits, setAtlasCredits] = useState(0);
   const [creditType, setCreditType] = useState<'normal' | 'atlas'>('normal');
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   
   // State for user settings
   const [settings, setSettings] = useState({
@@ -41,10 +235,8 @@ export function SettingsModal({ open, onClose, initialTab = "general" }: Setting
     call_me_by: 'Chief',
     about_user: '',
     theme: 'dark',
-    language: 'auto',
+    language: 'en',
     accentColor: 'purple',
-    spokenLanguage: 'en-us',
-    voice: 'nova',
     save_chat_history: true,
     improve_model: true,
   });
@@ -98,10 +290,8 @@ export function SettingsModal({ open, onClose, initialTab = "general" }: Setting
             call_me_by: profileData.call_me_by || 'Chief',
             about_user: profileData.about_user || '',
             theme: profileData.theme || 'dark',
-            language: profileData.language || 'auto',
+            language: profileData.language || 'en',
             accentColor: profileData.accentColor || 'purple',
-            spokenLanguage: profileData.spokenLanguage || 'en-us',
-            voice: profileData.voice || 'nova',
             save_chat_history: profileData.save_chat_history ?? true,
             improve_model: profileData.improve_model ?? true,
           }));
@@ -247,6 +437,13 @@ export function SettingsModal({ open, onClose, initialTab = "general" }: Setting
     } catch {}
   };
 
+  // Format member since text
+  const formatMonthYear = (date: Date) =>
+    new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric' }).format(date);
+  const memberSinceText = user?.created_at
+    ? `Member since ${formatMonthYear(new Date(user.created_at))}`
+    : '';
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="w-[1200px] max-w-[95vw] h-[80vh] bg-background border border-[var(--card-border)] p-0 rounded-[12px] flex">
@@ -281,104 +478,7 @@ export function SettingsModal({ open, onClose, initialTab = "general" }: Setting
             {/* All tab contents rendered here, vertical, never breaking out */}
             {/* (No min-w-full/w-full on tab content blocks) */}
             <div className="p-8">
-              <button
-                onClick={onClose}
-                className="absolute top-4 right-4 p-2 rounded-lg hover:bg-[var(--hover-bg)] text-[var(--text-secondary)] transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
               <AnimatePresence mode="wait">
-                {activeTab === "general" && (
-                  <motion.div
-                    key="general"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    transition={{ duration: 0.3 }}
-                    className="space-y-6"
-                  >
-                    <h2 className="text-gray-900 dark:text-[#EAEAEA] mb-6">General Settings</h2>
-                    
-                    <div className="grid grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <label className="text-gray-600 dark:text-[#A0A0A0]">Appearance</label>
-                        <Select value={settings.theme} onValueChange={(v) => saveProfile({ theme: v })}>
-                          <SelectTrigger className="bg-white dark:bg-[#181818] border-gray-200 dark:border-[#2A2A2A] text-gray-900 dark:text-[#EAEAEA]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="bg-white dark:bg-[#181818] border-gray-200 dark:border-[#2A2A2A]">
-                            <SelectItem value="dark">Dark</SelectItem>
-                            <SelectItem value="light">Light</SelectItem>
-                            <SelectItem value="system">System</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-gray-600 dark:text-[#A0A0A0]">Accent Color</label>
-                        <Select value={settings.accentColor} onValueChange={(v) => saveProfile({ accentColor: v })}>
-                          <SelectTrigger className="bg-white dark:bg-[#181818] border-gray-200 dark:border-[#2A2A2A] text-gray-900 dark:text-[#EAEAEA]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="bg-white dark:bg-[#181818] border-gray-200 dark:border-[#2A2A2A]">
-                            <SelectItem value="purple">Purple</SelectItem>
-                            <SelectItem value="blue">Blue</SelectItem>
-                            <SelectItem value="green">Green</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-gray-600 dark:text-[#A0A0A0]">Language</label>
-                        <Select value={settings.language} onValueChange={(v) => saveProfile({ language: v })}>
-                          <SelectTrigger className="bg-white dark:bg-[#181818] border-gray-200 dark:border-[#2A2A2A] text-gray-900 dark:text-[#EAEAEA]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="bg-white dark:bg-[#181818] border-gray-200 dark:border-[#2A2A2A]">
-                            <SelectItem value="auto">Auto-detect</SelectItem>
-                            <SelectItem value="en">English</SelectItem>
-                            <SelectItem value="es">Spanish</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-gray-600 dark:text-[#A0A0A0]">Spoken Language</label>
-                        <Select value={settings.spokenLanguage} onValueChange={(v) => saveProfile({ spokenLanguage: v })}>
-                          <SelectTrigger className="bg-white dark:bg-[#181818] border-gray-200 dark:border-[#2A2A2A] text-gray-900 dark:text-[#EAEAEA]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="bg-white dark:bg-[#181818] border-gray-200 dark:border-[#2A2A2A]">
-                            <SelectItem value="en-us">English (US)</SelectItem>
-                            <SelectItem value="en-gb">English (UK)</SelectItem>
-                            <SelectItem value="es">Spanish</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                      <div className="space-y-2">
-                      <label className="text-gray-600 dark:text-[#A0A0A0]">Voice</label>
-                      <div className="flex gap-2">
-                        <Select value={settings.voice} onValueChange={(v) => saveProfile({ voice: v })}>
-                          <SelectTrigger className="bg-white dark:bg-[#181818] border-gray-200 dark:border-[#2A2A2A] text-gray-900 dark:text-[#EAEAEA]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="bg-white dark:bg-[#181818] border-gray-200 dark:border-[#2A2A2A]">
-                            <SelectItem value="nova">Nova</SelectItem>
-                            <SelectItem value="echo">Echo</SelectItem>
-                            <SelectItem value="sage">Sage</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Button className="bg-[#5A5BEF] hover:bg-[#4A4BDF] text-white">
-                          Play
-                        </Button>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
                 {activeTab === "personalization" && (
                   <motion.div
                     key="personalization"
@@ -468,59 +568,6 @@ export function SettingsModal({ open, onClose, initialTab = "general" }: Setting
                   </motion.div>
                 )}
 
-                {activeTab === "notifications" && (
-                  <motion.div
-                    key="notifications"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    transition={{ duration: 0.3 }}
-                    className="space-y-6"
-                  >
-                    <h2 className="text-[#EAEAEA] mb-6">Notification Settings</h2>
-                    
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between p-4 bg-[#181818] border border-[#2A2A2A] rounded-[12px]">
-                        <div>
-                          <div className="text-[#EAEAEA]">Email Notifications</div>
-                          <div className="text-[#A0A0A0]">Receive updates via email</div>
-                        </div>
-                        <Switch 
-                          checked={settings.save_chat_history} 
-                          onCheckedChange={(c) => saveProfile({ save_chat_history: c })} 
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between p-4 bg-[#181818] border border-[#2A2A2A] rounded-[12px]">
-                        <div>
-                          <div className="text-[#EAEAEA]">Browser Notifications</div>
-                          <div className="text-[#A0A0A0]">Get notified in your browser</div>
-                        </div>
-                        <Switch />
-                      </div>
-
-                      <div className="flex items-center justify-between p-4 bg-[#181818] border border-[#2A2A2A] rounded-[12px]">
-                        <div>
-                          <div className="text-[#EAEAEA]">Sound Alerts</div>
-                          <div className="text-[#A0A0A0]">Play sound for new messages</div>
-                        </div>
-                        <Switch 
-                          checked={settings.improve_model} 
-                          onCheckedChange={(c) => saveProfile({ improve_model: c })} 
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between p-4 bg-[#181818] border border-[#2A2A2A] rounded-[12px]">
-                        <div>
-                          <div className="text-[#EAEAEA]">Weekly Summary</div>
-                          <div className="text-[#A0A0A0]">Receive weekly usage reports</div>
-                        </div>
-                        <Switch defaultChecked />
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
                 {activeTab === "credits" && (
                   <motion.div
                     key="credits"
@@ -585,7 +632,7 @@ export function SettingsModal({ open, onClose, initialTab = "general" }: Setting
                       {/* Credit Options */}
                       <div className="grid grid-cols-2 gap-4">
                         <button
-                          onClick={() => handleAddCredits(20, creditType)}
+                          onClick={() => setPaymentModalOpen(true)}
                           className="p-4 bg-white dark:bg-[#181818] border border-gray-200 dark:border-[#2A2A2A] rounded-[12px] hover:border-[#5A5BEF] transition-colors text-center"
                         >
                           <div className="text-[#5A5BEF] font-semibold text-lg mb-1">+20</div>
@@ -593,7 +640,7 @@ export function SettingsModal({ open, onClose, initialTab = "general" }: Setting
                           <div className="text-gray-900 dark:text-[#EAEAEA] text-sm font-medium">₹30</div>
                         </button>
                         <button
-                          onClick={() => handleAddCredits(100, creditType)}
+                          onClick={() => setPaymentModalOpen(true)}
                           className="p-4 bg-white dark:bg-[#181818] border border-gray-200 dark:border-[#2A2A2A] rounded-[12px] hover:border-[#5A5BEF] transition-colors text-center"
                         >
                           <div className="text-[#5A5BEF] font-semibold text-lg mb-1">+100</div>
@@ -651,94 +698,6 @@ export function SettingsModal({ open, onClose, initialTab = "general" }: Setting
                   </motion.div>
                 )}
 
-                {activeTab === "data" && (
-                  <motion.div
-                    key="data"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    transition={{ duration: 0.3 }}
-                    className="space-y-6"
-                  >
-                    <h2 className="text-gray-900 dark:text-[#EAEAEA] mb-6">Data Controls</h2>
-                    
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#181818] border border-gray-200 dark:border-[#2A2A2A] rounded-[12px]">
-                        <div>
-                          <div className="text-gray-900 dark:text-[#EAEAEA]">Chat History</div>
-                          <div className="text-gray-600 dark:text-[#A0A0A0]">Save conversation history</div>
-                        </div>
-                        <Switch defaultChecked />
-                      </div>
-
-                      <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#181818] border border-gray-200 dark:border-[#2A2A2A] rounded-[12px]">
-                        <div>
-                          <div className="text-gray-900 dark:text-[#EAEAEA]">Improve Model</div>
-                          <div className="text-gray-600 dark:text-[#A0A0A0]">Use my data to improve Private Teacher</div>
-                        </div>
-                        <Switch defaultChecked />
-                      </div>
-
-                      <div className="p-4 bg-gray-50 dark:bg-[#181818] border border-gray-200 dark:border-[#2A2A2A] rounded-[12px]">
-                        <h3 className="text-gray-900 dark:text-[#EAEAEA] mb-2">Export Data</h3>
-                        <p className="text-gray-600 dark:text-[#A0A0A0] mb-3">Download all your conversations and data</p>
-                        <Button onClick={exportData} className="bg-[#5A5BEF] hover:bg-[#4A4BDF] text-white">Export Data</Button>
-                      </div>
-
-                      <div className="p-4 bg-gray-50 dark:bg-[#181818] border border-red-300 dark:border-red-900/50 rounded-[12px]">
-                        <h3 className="text-red-600 dark:text-red-400 mb-2">Delete All Data</h3>
-                        <p className="text-gray-600 dark:text-[#A0A0A0] mb-3">Permanently delete all your conversations</p>
-                        <Button onClick={deleteAccount} className="bg-red-100 dark:bg-red-500/20 hover:bg-red-200 dark:hover:bg-red-500/30 text-red-600 dark:text-red-400 border border-red-300 dark:border-red-900">Delete Everything</Button>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
-                {activeTab === "security" && (
-                  <motion.div
-                    key="security"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    transition={{ duration: 0.3 }}
-                    className="space-y-6"
-                  >
-                    <h2 className="text-gray-900 dark:text-[#EAEAEA] mb-6">Security</h2>
-                    
-                    <div className="space-y-4">
-                      <div className="p-4 bg-gray-50 dark:bg-[#181818] border border-gray-200 dark:border-[#2A2A2A] rounded-[12px]">
-                        <h3 className="text-gray-900 dark:text-[#EAEAEA] mb-2">Change Password</h3>
-                        <p className="text-gray-600 dark:text-[#A0A0A0] mb-3">Update your account password</p>
-                        <Button className="bg-[#5A5BEF] hover:bg-[#4A4BDF] text-white">
-                          Change Password
-                        </Button>
-                      </div>
-
-                      <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#181818] border border-gray-200 dark:border-[#2A2A2A] rounded-[12px]">
-                        <div>
-                          <div className="text-gray-900 dark:text-[#EAEAEA]">Two-Factor Authentication</div>
-                          <div className="text-gray-600 dark:text-[#A0A0A0]">Add an extra layer of security</div>
-                        </div>
-                        <Switch />
-                      </div>
-
-                      <div className="p-4 bg-gray-50 dark:bg-[#181818] border border-gray-200 dark:border-[#2A2A2A] rounded-[12px]">
-                        <h3 className="text-gray-900 dark:text-[#EAEAEA] mb-2">Active Sessions</h3>
-                        <p className="text-gray-600 dark:text-[#A0A0A0] mb-3">Manage devices logged into your account</p>
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between py-2">
-                            <div>
-                              <div className="text-gray-900 dark:text-[#EAEAEA]">Current Session</div>
-                              <div className="text-gray-600 dark:text-[#A0A0A0]">Chrome on MacOS</div>
-                            </div>
-                            <div className="text-[#5A5BEF]">Active</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
                 {activeTab === "account" && (
                   <motion.div
                     key="account"
@@ -776,8 +735,13 @@ export function SettingsModal({ open, onClose, initialTab = "general" }: Setting
                       <div className="p-4 bg-gray-50 dark:bg-[#181818] border border-gray-200 dark:border-[#2A2A2A] rounded-[12px]">
                         <h3 className="text-gray-900 dark:text-[#EAEAEA] mb-2">Subscription</h3>
                         <p className="text-gray-600 dark:text-[#A0A0A0] mb-1">Current Plan: Free</p>
-                        <p className="text-gray-600 dark:text-[#A0A0A0] mb-3">Member since October 2024</p>
-                        <Button className="bg-[#5A5BEF] hover:bg-[#4A4BDF] text-white">
+                        <p className="text-gray-600 dark:text-[#A0A0A0] mb-3">{memberSinceText}</p>
+                        <Button 
+                          className="bg-[#5A5BEF] hover:bg-[#4A4BDF] text-white"
+                          onClick={() => {
+                            window.location.href = '/pricing';
+                          }}
+                        >
                           Upgrade Plan
                         </Button>
                       </div>
@@ -785,7 +749,10 @@ export function SettingsModal({ open, onClose, initialTab = "general" }: Setting
                       <div className="p-4 bg-gray-50 dark:bg-[#181818] border border-red-300 dark:border-red-900/50 rounded-[12px]">
                         <h3 className="text-red-600 dark:text-red-400 mb-2">Danger Zone</h3>
                         <p className="text-gray-600 dark:text-[#A0A0A0] mb-3">Permanently delete your account</p>
-                        <Button className="bg-red-100 dark:bg-red-500/20 hover:bg-red-200 dark:hover:bg-red-500/30 text-red-600 dark:text-red-400 border border-red-300 dark:border-red-900">
+                        <Button 
+                          className="bg-red-100 dark:bg-red-500/20 hover:bg-red-200 dark:hover:bg-red-500/30 text-red-600 dark:text-red-400 border border-red-300 dark:border-red-900"
+                          onClick={() => setConfirmDeleteOpen(true)}
+                        >
                           Delete Account
                         </Button>
                       </div>
@@ -797,6 +764,15 @@ export function SettingsModal({ open, onClose, initialTab = "general" }: Setting
           </div>
         </div>
       </DialogContent>
+      
+      {/* Payment Modal */}
+      <PaymentModal open={paymentModalOpen} onClose={() => setPaymentModalOpen(false)} />
+      {/* Confirm Delete Modal */}
+      <ConfirmDeleteModal 
+        open={confirmDeleteOpen} 
+        onClose={() => setConfirmDeleteOpen(false)} 
+        onConfirm={() => { window.location.href = '/account/delete-feedback'; }}
+      />
     </Dialog>
   );
 }

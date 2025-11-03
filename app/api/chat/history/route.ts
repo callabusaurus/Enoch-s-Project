@@ -20,12 +20,55 @@ export async function GET(req: Request) {
     // Messages for this chat + user
     const { data, error } = await supabase
       .from('messages')
-      .select('role, content, created_at')
+      .select('id, role, content, created_at')
       .eq('user_id', userId)
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true });
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    const messages = (data || []).map(m => ({ type: m.role === 'assistant' ? 'ai' : 'user', content: m.content }));
+    
+    // Fetch attachments for user messages
+    const messagesWithAttachments = await Promise.all(
+      (data || []).map(async (m) => {
+        if (m.role === 'user') {
+          const { data: attachments } = await supabase
+            .from('attachments')
+            .select('id, file_name, file_type, file_size, file_path')
+            .eq('message_id', m.id)
+            .eq('user_id', userId);
+          
+          if (attachments && attachments.length > 0) {
+            // Get URLs for attachments
+            const attachmentsWithUrls = await Promise.all(
+              attachments.map(async (att: any) => {
+                const { data: urlData } = supabase.storage
+                  .from('chat-files')
+                  .getPublicUrl(att.file_path);
+                return {
+                  id: att.id,
+                  url: urlData?.publicUrl || '',
+                  filename: att.file_name,
+                  file_type: att.file_type,
+                  file_size: att.file_size
+                };
+              })
+            );
+            return {
+              type: 'user',
+              content: m.content,
+              messageId: m.id,
+              attachments: attachmentsWithUrls
+            };
+          }
+        }
+        return {
+          type: m.role === 'assistant' ? 'ai' : 'user',
+          content: m.content,
+          messageId: m.id
+        };
+      })
+    );
+    
+    const messages = messagesWithAttachments;
     
     // Optionally fetch teacher_type from chat for frontend use
     const { data: chatData } = await supabase

@@ -5,32 +5,72 @@ import { getAuthenticatedUser } from '@/lib/supabase/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60; // 60 seconds for large files
 
-async function extractTextFromPDF(buffer: Buffer): Promise<string> {
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Writes the buffer to a temp file, spawns scripts/pdfWorker.js using node,
+ * reads its stdout (JSON), cleans up temp file and returns extracted text.
+ */
+async function extractTextFromPDF(buffer: Buffer, attachmentId?: string, filename?: string): Promise<string> {
+  const tmpDir = os.tmpdir();
+  const fileName = `pdf-${Date.now()}-${Math.random().toString(36).slice(2,8)}.pdf`;
+  const filePath = path.join(tmpDir, fileName);
+  // write temp PDF
+  await fs.writeFile(filePath, buffer);
+
   try {
-    // Use dynamic import - works with serverComponentsExternalPackages in Next.js 14+
-    // pdf-parse is an ES module, so dynamic import handles it correctly
-    const pdfModule = await import('pdf-parse');
-    // pdf-parse exports a default function in ES module format
-    const pdfParse = pdfModule.default || pdfModule;
+    console.log('[PROCESS DEBUG] Spawning pdf worker', { attachmentId, filename, filePath });
+    const workerPath = path.join(process.cwd(), 'scripts', 'pdfWorker.js');
+    const { stdout, stderr } = await execFileAsync('node', [workerPath, filePath], {
+      // Increase maxBuffer for large PDFs -> captured stdout
+      maxBuffer: 1024 * 1024 * 30, // 30MB
+    });
+
+    if (stderr && stderr.trim()) {
+      // worker writes JSON error objects to stderr
+      try {
+        const parsedErr = JSON.parse(stderr.trim());
+        const msg = parsedErr?.error || stderr.trim();
+        console.error('[PROCESS DEBUG] pdfWorker stderr JSON', parsedErr);
+        throw new Error(msg);
+      } catch (parseErr) {
+        // fallback to raw stderr
+        console.error('[PROCESS DEBUG] pdfWorker stderr', stderr);
+        throw new Error(stderr.trim());
+      }
+    }
+
+    if (!stdout || !stdout.trim()) {
+      throw new Error('pdfWorker produced no output');
+    }
+
+    const parsed = JSON.parse(stdout);
+    const text = parsed?.text ?? '';
+    console.log('[PROCESS DEBUG] pdfWorker extracted length', { length: text.length, attachmentId, filename });
     
-    if (typeof pdfParse !== 'function') {
-      console.error('[PROCESS DEBUG] pdf-parse export is not a function:', {
-        type: typeof pdfParse,
-        moduleKeys: Object.keys(pdfModule),
-        hasDefault: 'default' in pdfModule
-      });
-      throw new Error('pdf-parse export is not a function');
+    // Validate extraction - throw error if extraction failed or returned minimal content
+    if (!text || typeof text !== 'string') {
+      throw new Error('PDF extraction returned invalid or empty text. The PDF may be corrupted, encrypted, or image-based.');
     }
     
-    const data = await pdfParse(buffer);
-    return data.text || '';
-  } catch (error) {
-    console.error('[PROCESS DEBUG] PDF extraction error:', {
-      error,
-      errorMessage: error instanceof Error ? error.message : String(error),
-      errorStack: error instanceof Error ? error.stack : undefined
-    });
-    throw new Error('Failed to extract text from PDF');
+    if (text.trim().length < 10) {
+      // Very short text likely means extraction failed or PDF is image-based
+      throw new Error('PDF extraction returned minimal text (less than 10 characters). The PDF may be image-based, encrypted, or have complex formatting that could not be extracted.');
+    }
+    
+    return text;
+  } catch (err: any) {
+    console.error('[PROCESS DEBUG] PDF extraction error:', { error: err?.message ?? String(err) , attachmentId, filename });
+    throw new Error(`Failed to extract text from PDF: ${err?.message ?? String(err)}`);
+  } finally {
+    // cleanup
+    try { await fs.unlink(filePath); } catch(e) { /* ignore cleanup errors */ }
   }
 }
 
@@ -80,11 +120,12 @@ async function extractTextFromImage(buffer: Buffer, mimeType: string): Promise<s
   }
 }
 
-async function extractTextFromFile(file: File | { arrayBuffer: () => Promise<ArrayBuffer>, name: string, type: string }): Promise<string> {
+async function extractTextFromFile(file: File | { arrayBuffer: () => Promise<ArrayBuffer>, name: string, type: string }, attachmentId?: string): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
   const mimeType = file.type || '';
   const extension = file.name.split('.').pop()?.toLowerCase() || '';
+  const filename = file.name;
 
   // Handle text files
   if (mimeType.startsWith('text/') || extension === 'txt' || extension === 'md' || extension === 'json' || extension === 'csv') {
@@ -98,7 +139,7 @@ async function extractTextFromFile(file: File | { arrayBuffer: () => Promise<Arr
 
   // Handle PDFs
   if (mimeType === 'application/pdf' || extension === 'pdf') {
-    return await extractTextFromPDF(buffer);
+    return await extractTextFromPDF(buffer, attachmentId, filename);
   }
 
   // Handle DOCX
@@ -274,7 +315,7 @@ export async function POST(req: Request) {
     // Extract text from file
     let extractedText: string;
     try {
-      extractedText = await extractTextFromFile(file);
+      extractedText = await extractTextFromFile(file, attachmentId);
       console.log('[PROCESS DEBUG] Text extraction completed:', {
         attachmentId,
         textLength: extractedText.length
@@ -300,6 +341,24 @@ export async function POST(req: Request) {
     if (updateError) {
       console.error('[PROCESS DEBUG] Failed to update attachment:', updateError);
       return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
+
+    // Verify the text was actually stored correctly
+    const { data: verifyData, error: verifyError } = await supabase
+      .from('attachments')
+      .select('extracted_text')
+      .eq('id', attachmentId)
+      .eq('user_id', user.id)
+      .single();
+    
+    if (verifyData) {
+      const storedLength = verifyData.extracted_text?.length || 0;
+      console.log('[PROCESS DEBUG] Verification - Extracted length:', extractedText.length, 'Stored length:', storedLength);
+      if (storedLength !== extractedText.length) {
+        console.error('[PROCESS DEBUG] WARNING: Text length mismatch! Extracted:', extractedText.length, 'Stored:', storedLength);
+      }
+    } else if (verifyError) {
+      console.error('[PROCESS DEBUG] Verification query error:', verifyError);
     }
 
     return NextResponse.json({ 

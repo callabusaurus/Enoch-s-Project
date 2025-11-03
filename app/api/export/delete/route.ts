@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
 
 export async function DELETE(req: Request) {
   const authResult = await getAuthenticatedUser(req);
@@ -23,10 +24,20 @@ export async function DELETE(req: Request) {
     try { await supabase.from('credit_transactions').delete().eq('user_id', userId); } catch {}
     // Delete user profile/session
     await supabase.from('profiles').delete().eq('id', userId);
-    // TODO: If using direct Supabase Auth, you may also call admin delete on user (if available/needed by setup).
-    // Optionally, remove or revoke any 3rd-party auth/tokens.
-    // Log out or invalidate session if supported
-    // (Cannot always do this from inside the request, front end should redirect user to logout page afterwards)
+    
+    // Delete the Supabase Auth user so the old credentials can no longer log in
+    // Requires SUPABASE_SERVICE_ROLE_KEY in server env (never exposed to client)
+    try {
+      const admin = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      );
+      await admin.auth.admin.deleteUser(userId);
+    } catch (e) {
+      // If admin delete fails, still return success for data deletion, but log server-side
+      console.error('Admin deleteUser failed:', e);
+    }
+
     return NextResponse.json({ success: true });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Delete failed' }, { status: 500 });

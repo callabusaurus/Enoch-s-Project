@@ -1,33 +1,77 @@
-import { Avatar, AvatarFallback } from "./ui/avatar";
-import { Sparkles } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import { Sparkles, FileIcon } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { ReactNode } from 'react';
+import { ReactNode, useState, useEffect } from 'react';
+import { supabase } from "../lib/supabase/client";
+import { getAvatarUrl, getUserInitials } from "../lib/avatar";
 import 'katex/dist/katex.min.css';
 
 interface MessageCardProps {
   type: "user" | "ai";
   content: string;
   images?: string[];
+  attachments?: Array<{
+    id: string;
+    url: string;
+    filename: string;
+    file_type: string;
+    file_size: number;
+  }>;
 }
 
 /**
- * Normalize math syntax - clean up escaped backslashes and convert LaTeX delimiters
- * This should run BEFORE preprocessMath to clean the raw AI output
+ * Repair matrix row separators that were lost in transit
+ * Conservative fallback - only repairs when matrix environment exists and \\\\ are missing
+ */
+function repairMatrixRows(text: string): string {
+  if (!text) return text;
+  
+  return text.replace(/\\begin\{(bmatrix|matrix|pmatrix|array)\}([\s\S]*?)\\end\{\1\}/g, (m, env, body) => {
+    // If rows already present, do nothing
+    if (/\\\\/.test(body)) return m;
+    
+    const inner = body.trim();
+    
+    // If no '&' found, don't touch it
+    if (!/&/.test(inner)) return m;
+    
+    // Split on whitespace/newlines and collapse multiple spaces — prepare tokens
+    // Break into tokens by looking for '&' separators
+    // First: extract all tokens separated by & (these are column entries)
+    const tokens = inner.split(/\s*&\s*/).map((s: string) => s.trim()).filter(Boolean);
+    
+    // Guess number of columns by analyzing first 1-2 logical rows: find most common columns-per-row by scanning for patterns
+    // Fallback: estimate columns by scanning first 60 chars for ampersands
+    const colsGuess = Math.max(1, (inner.slice(0, 120).match(/&/g) || []).length + 1);
+    
+    // Re-chunk tokens into rows of length colsGuess
+    const rows: string[] = [];
+    for (let i = 0; i < tokens.length; i += colsGuess) {
+      rows.push(tokens.slice(i, i + colsGuess).join(' & '));
+    }
+    
+    // Return rebuilt environment with \\\\ row separators
+    return `\\begin{${env}} ${rows.join(' \\\\ ')} \\end{${env}}`;
+  });
+}
+
+/**
+ * Safe normalizer — only converts explicit \( ... \) and \[ ... \] math delimiters to $...$ / $$...$$
+ * IMPORTANT: DO NOT globally replace backslashes or remove them. This preserves matrix \\\\ sequences intact.
  */
 function normalizeMathSyntax(text: string): string {
   if (!text) return text;
   
-  return text
-    // Replace escaped backslashes like \\sin -> \sin
-    .replace(/\\\\/g, "\\")
-    // Convert \(...\) to $...$ (inline math)
-    .replace(/\\\((.*?)\\\)/gs, '$$$1$')
-    // Convert \[...\] to $$...$$ (block math)
-    .replace(/\\\[(.*?)\\\]/gs, '$$$1$$')
-    // Remove trailing " \ " artifacts that break KaTeX
-    .replace(/\\\s/g, '');
+  // Convert \( ... \) => $...$
+  text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_m, p1) => `$${p1}$`);
+  
+  // Convert \[ ... \] => $$...$$
+  text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_m, p1) => `$$${p1}$$`);
+  
+  // Important: DO NOT globally replace backslashes or remove them.
+  return text;
 }
 
 /**
@@ -242,15 +286,49 @@ function preprocessMath(content: string): string {
   return processed;
 }
 
-export function MessageCard({ type, content, images = [] }: MessageCardProps) {
-  if (!content) {
+export function MessageCard({ type, content, images = [], attachments = [] }: MessageCardProps) {
+  const [user, setUser] = useState<any>(null);
+
+  // Get current user
+  useEffect(() => {
+    const loadUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUser(session.user);
+      }
+    };
+    loadUser();
+  }, []);
+
+  if (!content && (!images || images.length === 0) && (!attachments || attachments.length === 0)) {
     return null;
   }
 
-  // Step 1: Normalize math syntax (clean escaped backslashes, convert LaTeX delimiters)
-  // Step 2: Preprocess to wrap unwrapped LaTeX expressions
-  const normalizedContent = normalizeMathSyntax(content);
-  const processedContent = preprocessMath(normalizedContent);
+  // Step 1: Safe normalize math syntax (only converts delimiters, preserves backslashes)
+  let finalContent = normalizeMathSyntax(content);
+  
+  // Step 2: Apply repairMatrixRows fallback if matrix detected and \\\\ missing
+  if (type === 'ai' && /\\begin\{(bmatrix|matrix|pmatrix|array)\}/.test(finalContent) && !/\\\\/.test(finalContent)) {
+    const repaired = repairMatrixRows(finalContent);
+    
+    // DEV-only: log matrix repair
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[DEV] Matrix repaired?:", repaired !== finalContent, { 
+        beforePreview: finalContent.slice(0, 200), 
+        afterPreview: repaired.slice(0, 200) 
+      });
+    }
+    
+    finalContent = repaired;
+  }
+  
+  // Step 3: Preprocess to wrap unwrapped LaTeX expressions
+  finalContent = preprocessMath(finalContent);
+  
+  // DEV-only: log final content before rendering
+  if (process.env.NODE_ENV !== "production" && type === 'ai') {
+    console.log("[DEV] Rendering message id:", type, " preview:", finalContent.slice(0, 400));
+  }
 
   // User messages align to right
   if (type === "user") {
@@ -258,45 +336,93 @@ export function MessageCard({ type, content, images = [] }: MessageCardProps) {
       <div className="w-full px-6 py-6 bg-transparent" style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
         <div className="flex items-end gap-2" style={{ maxWidth: '80%' }}>
           <div className="bg-gray-100 dark:bg-transparent px-4 py-2 rounded-2xl rounded-tr-sm">
-            <div className="markdown-content text-gray-900 dark:text-[#EAEAEA] prose prose-invert max-w-none">
-              <ReactMarkdown
-                remarkPlugins={[remarkMath]}
-                rehypePlugins={[rehypeKatex]}
-                components={{
-                  // CRITICAL: Explicit handlers for math nodes
-                  math: ({ children }: any) => <>{children}</>,
-                  math_inline: ({ children }: any) => <span className="math-inline">{children}</span>,
-                  math_display: ({ children }: any) => <div className="math-display">{children}</div>,
-                  // Paragraphs with proper styling
-                  p: ({children, ...props}: {children?: ReactNode}) => (
-                    <p className="leading-7 mb-0 text-gray-900 dark:text-[#EAEAEA] whitespace-pre-wrap break-words" {...props}>{children}</p>
-                  ),
-                  // Preserve other markdown elements if users type them
-                  strong: ({children, ...props}: {children?: ReactNode}) => (
-                    <strong className="font-semibold" {...props}>{children}</strong>
-                  ),
-                  em: ({children, ...props}: {children?: ReactNode}) => (
-                    <em className="italic" {...props}>{children}</em>
-                  ),
-                  code: ({children, className, ...props}: any) => {
-                    const isInline = !className || !className.includes('language-');
-                    if (isInline) {
-                      return (
-                        <code className="bg-gray-200 dark:bg-[#2A2A2A] px-1.5 py-0.5 rounded text-sm font-mono text-gray-900 dark:text-[#EAEAEA]" {...props}>{children}</code>
-                      );
-                    }
-                    return (
-                      <code className="block bg-gray-200 dark:bg-[#2A2A2A] p-3 rounded-lg text-sm font-mono text-gray-900 dark:text-[#EAEAEA] overflow-x-auto mb-4" {...props}>{children}</code>
-                    );
-                  },
-                }}
-              >
-                {processedContent}
-              </ReactMarkdown>
-            </div>
+            {/* Display attachments first */}
+            {attachments && attachments.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {attachments.map((att) => (
+                  <div key={att.id}>
+                    {att.file_type.startsWith('image/') ? (
+                      <a
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block rounded-lg overflow-hidden border border-gray-200 dark:border-[#3A3A3A] hover:border-[#5A5BEF] transition-colors"
+                        style={{ maxWidth: '300px', maxHeight: '300px' }}
+                      >
+                        <img
+                          src={att.url}
+                          alt={att.filename}
+                          className="w-full h-full object-contain"
+                          style={{ maxWidth: '300px', maxHeight: '300px' }}
+                        />
+                      </a>
+                    ) : (
+                      <a
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 bg-[var(--card-bg)] border border-[var(--card-border)] rounded-lg px-3 py-2 hover:border-[#5A5BEF] transition-colors"
+                      >
+                        <FileIcon className="w-4 h-4 text-[var(--text-secondary)]" />
+                        <span className="text-sm text-[var(--text-primary)]">{att.filename}</span>
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {content && (() => {
+              // For user messages, just normalize (no repair needed)
+              const userFinalContent = preprocessMath(normalizeMathSyntax(content));
+              return (
+                <div className="markdown-content text-gray-900 dark:text-[#EAEAEA] prose prose-invert max-w-none">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                    components={{
+                      // CRITICAL: Explicit handlers for math nodes
+                      // @ts-ignore - custom math components for remark-math/rehype-katex
+                      math: ({ children }: any) => <>{children}</>,
+                      math_inline: ({ children }: any) => <span className="math-inline">{children}</span>,
+                      math_display: ({ children }: any) => <div className="math-display">{children}</div>,
+                      // Paragraphs with proper styling
+                      p: ({children, ...props}: {children?: ReactNode}) => (
+                        <p className="leading-7 mb-0 text-gray-900 dark:text-[#EAEAEA] whitespace-pre-wrap break-words" {...props}>{children}</p>
+                      ),
+                      // Preserve other markdown elements if users type them
+                      strong: ({children, ...props}: {children?: ReactNode}) => (
+                        <strong className="font-semibold" {...props}>{children}</strong>
+                      ),
+                      em: ({children, ...props}: {children?: ReactNode}) => (
+                        <em className="italic" {...props}>{children}</em>
+                      ),
+                      code: ({children, className, ...props}: any) => {
+                        const isInline = !className || !className.includes('language-');
+                        if (isInline) {
+                          return (
+                            <code className="bg-gray-200 dark:bg-[#2A2A2A] px-1.5 py-0.5 rounded text-sm font-mono text-gray-900 dark:text-[#EAEAEA]" {...props}>{children}</code>
+                          );
+                        }
+                        return (
+                          <code className="block bg-gray-200 dark:bg-[#2A2A2A] p-3 rounded-lg text-sm font-mono text-gray-900 dark:text-[#EAEAEA] overflow-x-auto mb-4" {...props}>{children}</code>
+                        );
+                      },
+                    }}
+                  >
+                    {userFinalContent}
+                  </ReactMarkdown>
+                </div>
+              );
+            })()}
           </div>
           <Avatar className="w-8 h-8 flex-shrink-0">
-            <AvatarFallback className="bg-[#5A5BEF] text-white">JD</AvatarFallback>
+            {user && getAvatarUrl(user) && (
+              <AvatarImage src={getAvatarUrl(user)!} alt={user.email || ''} />
+            )}
+            <AvatarFallback className="bg-[#5A5BEF] text-white">
+              {user ? getUserInitials(user) : "?"}
+            </AvatarFallback>
           </Avatar>
         </div>
       </div>
@@ -319,6 +445,7 @@ export function MessageCard({ type, content, images = [] }: MessageCardProps) {
             rehypePlugins={[rehypeKatex]}
             components={{
             // CRITICAL: Explicit handlers for math nodes from remark-math/rehype-katex
+            // @ts-ignore - custom math components for remark-math/rehype-katex
             math: ({ children }: any) => <>{children}</>,
             math_inline: ({ children }: any) => <span className="math-inline">{children}</span>,
             math_display: ({ children }: any) => <div className="math-display">{children}</div>,
@@ -401,7 +528,7 @@ export function MessageCard({ type, content, images = [] }: MessageCardProps) {
             ),
             }}
           >
-            {processedContent}
+            {finalContent}
           </ReactMarkdown>
           </div>
           {/* Display images if available - compact thumbnails, max 3, proportional sizing (w-32 h-32 default) */}

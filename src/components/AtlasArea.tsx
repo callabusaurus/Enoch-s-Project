@@ -298,7 +298,7 @@ export function AtlasArea({ chatId = "new-chat", onChatIdUpdate }: AtlasAreaProp
       <div className="flex-1 overflow-y-auto" ref={scrollRef}>
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full px-6">
-            <h1 className="text-[var(--text-primary)] mb-8">What would you like to search?</h1>
+            <h1 className="text-[var(--text-primary)] mb-8">Search the web with Atlas</h1>
           </div>
         ) : (
           <div className="w-full">

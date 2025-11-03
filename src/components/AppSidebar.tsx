@@ -17,9 +17,10 @@ import {
   X
 } from "lucide-react";
 import { SidebarItem } from "./SidebarItem";
-import { Avatar, AvatarFallback } from "./ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { ThemeToggle } from "./ThemeToggle";
 import { supabase } from "../lib/supabase/client";
+import { getAvatarUrl, getUserInitials } from "../lib/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -249,7 +250,12 @@ export function AppSidebar({
           <DropdownMenuTrigger asChild>
             <button className={`flex items-center ${isOpen ? 'gap-3' : 'justify-center'} w-full p-2 rounded-xl hover:bg-[var(--hover-bg)] transition-colors`}>
               <Avatar className="w-8 h-8 flex-shrink-0">
-                <AvatarFallback className="bg-[#5A5BEF] text-white">DR</AvatarFallback>
+                {user && getAvatarUrl(user) && (
+                  <AvatarImage src={getAvatarUrl(user)!} alt={user.email || ''} />
+                )}
+                <AvatarFallback className="bg-[#5A5BEF] text-white">
+                  {user ? getUserInitials(user) : "?"}
+                </AvatarFallback>
               </Avatar>
               <AnimatePresence>
                 {isOpen && (

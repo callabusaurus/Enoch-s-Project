@@ -2498,6 +2498,9 @@ html {
 
 /* KaTeX Math Rendering Styles for Dark Theme */
 .katex {
+  display: inline-block !important;
+  white-space: normal !important;
+  line-height: 1.6 !important;
   color: inherit;
   font-size: 1.1em;
 }
@@ -2506,17 +2509,75 @@ html {
   color: #EAEAEA !important;
 }
 
-/* Block math (display) styling */
+/* Block math (display) styling - Fixed for proper matrix rendering */
+/* Clean KaTeX matrix display - no scrollbars */
 .katex-display {
-  margin: 1em 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible !important;
+  margin: 1rem 0 !important;
+  display: block !important;
+  text-align: center !important;
   padding: 0.5em 0;
 }
 
 .katex-display > .katex {
-  display: inline-block;
-  white-space: nowrap;
+  overflow: visible !important;
+  max-width: none !important;
+  display: inline-block !important;
+  white-space: normal !important;
+}
+
+/* Matrix and array alignment - CRITICAL for proper row/column rendering */
+/* Clean KaTeX matrix display - no scrollbars */
+.katex table {
+  display: table !important;
+  width: auto !important;
+  table-layout: auto !important;
+  border-collapse: separate !important;
+  overflow: visible !important;
+}
+
+.katex td, .katex th {
+  padding: 0 0.4em !important;
+  vertical-align: middle !important;
+}
+
+.katex .array {
+  border-collapse: separate !important;
+  border-spacing: 0.25em !important;
+  display: table !important;
+  table-layout: auto !important;
+  width: auto !important;
+  overflow: visible !important;
+}
+
+/* Ensure table rows display properly */
+.katex .array > tbody {
+  display: table-row-group !important;
+}
+
+.katex .array > tbody > tr {
+  display: table-row !important;
+}
+
+/* Ensure table cells display properly */
+.katex .arraycol {
+  display: table-cell !important;
+  padding: 0.15em 0.25em !important;
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
+/* Ensure no parent container interferes with table layout */
+.markdown-content .katex .array,
+.markdown-content .katex-display .katex .array {
+  display: table !important;
+  width: auto !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+}
+
+.katex .mord + .mord {
+  margin-left: 0.3em !important;
 }
 
 /* Ensure math elements are readable in dark theme */

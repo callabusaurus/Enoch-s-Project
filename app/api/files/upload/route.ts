@@ -2,9 +2,10 @@ import { NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/supabase/server';
 import { randomUUID } from 'crypto';
 
-export const config = {
-  api: { bodyParser: false },
-};
+// Use Node.js runtime for PDF extraction
+export const runtime = 'nodejs';
+
+// Removed deprecated config - App Router handles this automatically
 
 async function parseMultipart(req: Request) {
   // Note: Node.js 'formidable'/'busboy' needed for prod; here, assume edge/serverless can get FormData
@@ -69,6 +70,21 @@ export async function POST(req: Request) {
   const storagePath = `${userId}/${Date.now()}-${filename}`;
   // Upload to Supabase Storage via signed URL REST
   const bytes = await file.arrayBuffer();
+  const buffer = Buffer.from(bytes);
+  
+  // Extract text if it's a PDF
+  let extractedText = null;
+  if (mime === 'application/pdf' || ext?.toLowerCase() === 'pdf') {
+    try {
+      const { extractTextFromBuffer } = await import('@/lib/pdfExtractor');
+      extractedText = await extractTextFromBuffer(buffer);
+      console.log('[UPLOAD DEBUG] PDF text extracted, length:', extractedText.length);
+    } catch (extractErr) {
+      console.error('[UPLOAD DEBUG] PDF extraction failed:', extractErr);
+      // Continue with upload even if extraction fails
+    }
+  }
+  
   const { data: storageRes, error: uploadErr } = await supabase.storage
     .from('chat-files')
     .upload(storagePath, new Uint8Array(bytes), { contentType: mime });
@@ -95,6 +111,7 @@ export async function POST(req: Request) {
       file_path: storagePath,
       file_size: size,
       file_type: mime,
+      extracted_text: extractedText, // Store extracted text if available
     })
     .select('id, created_at')
     .single();
@@ -109,6 +126,7 @@ export async function POST(req: Request) {
     chatId: actualChatId, // Return actual UUID
     uploadedAt: attachmentRow.created_at,
     messageId: messageRow.id,
+    extractedTextLength: extractedText?.length ?? null,
   });
 }
 

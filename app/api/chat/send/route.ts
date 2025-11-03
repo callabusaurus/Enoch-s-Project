@@ -62,15 +62,76 @@ Encouraging: "Great question." "That's exactly right." "Almost, let's try lookin
 
 Patient: Never make the user feel bad for not knowing a term. Treat every question as an opportunity to build their foundation.`;
 
+// Helper function to get attachments with extracted text for a message
+async function getAttachmentsWithText(supabase: any, userId: string, messageId: string): Promise<string> {
+  try {
+    console.log('[CHAT SEND] Fetching attachments for message:', messageId);
+    const { data: attachments, error } = await supabase
+      .from('attachments')
+      .select('id, file_name, extracted_text, message_id')
+      .eq('user_id', userId)
+      .eq('message_id', messageId);
+    
+    console.log('[CHAT SEND] Found attachments:', attachments?.length || 0, 'Error:', error?.message);
+    
+    if (error || !attachments || attachments.length === 0) {
+      return '';
+    }
+    
+    // Build file content text
+    let fileContent = '';
+    for (const att of attachments) {
+      console.log('[CHAT SEND] Attachment:', att.file_name, 'Has text:', !!att.extracted_text, 'Length:', att.extracted_text?.length || 0);
+      if (att.extracted_text && att.extracted_text.trim()) {
+        // Check if it's an error message
+        if (att.extracted_text.includes('[File processing failed:') || 
+            att.extracted_text.includes('Failed to extract')) {
+          // Don't include error messages in the content - let AI know there was an issue
+          fileContent += `\n\n[File: ${att.file_name} - Unable to extract text content. The file may be image-based, encrypted, or in an unsupported format.]\n`;
+        } else {
+          // Valid extracted text
+          fileContent += `\n\n[File: ${att.file_name}]\n${att.extracted_text}\n`;
+        }
+      } else {
+        // File hasn't been processed yet, mention it
+        fileContent += `\n\n[File: ${att.file_name} - Processing in progress, content may be available shortly]\n`;
+      }
+    }
+    
+    console.log('[CHAT SEND] Final file content length:', fileContent.length);
+    return fileContent;
+  } catch (error) {
+    console.error('Error fetching attachments:', error);
+    return '';
+  }
+}
+
 async function getMessages(supabase: any, userId: string, chatId: string) {
   const { data, error } = await supabase
     .from('messages')
-    .select('role, content, created_at')
+    .select('id, role, content, created_at')
     .eq('user_id', userId)
     .eq('chat_id', chatId)
     .order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
-  return data || [];
+  
+  // For each user message, fetch and append file content
+  const messagesWithFiles = await Promise.all(
+    (data || []).map(async (m: any) => {
+      if (m.role === 'user' && m.id) {
+        const fileContent = await getAttachmentsWithText(supabase, userId, m.id);
+        if (fileContent) {
+          return {
+            ...m,
+            content: m.content + fileContent
+          };
+        }
+      }
+      return m;
+    })
+  );
+  
+  return messagesWithFiles;
 }
 
 // Generate a concise chat title (1-4 words) from the first user message
@@ -143,10 +204,15 @@ export async function POST(req: Request) {
 
     let body;
     try { body = await req.json(); } catch { body = {}; }
-    const { chatId = 'new-chat', content, teacherId } = body;
-    if (!content || typeof content !== 'string') {
-      return NextResponse.json({ error: 'Message content required.' }, { status: 400 });
+    const { chatId = 'new-chat', content, teacherId, attachmentIds } = body;
+    if ((!content || typeof content !== 'string' || !content.trim()) && (!attachmentIds || !Array.isArray(attachmentIds) || attachmentIds.length === 0)) {
+      return NextResponse.json({ error: 'Message content or attachment is required.' }, { status: 400 });
     }
+    
+    // Use provided content or generate default for files
+    const actualContent = (content && content.trim()) || (attachmentIds && attachmentIds.length > 0 
+      ? `Please analyze the attached file${attachmentIds.length > 1 ? 's' : ''}.` 
+      : '');
 
     // Generate UUID if chatId is "new-chat"
     const actualChatId = chatId === 'new-chat' ? randomUUID() : chatId;
@@ -231,12 +297,104 @@ export async function POST(req: Request) {
       }
     }
     
-    const { error: messageInsertError } = await supabase
+    const { data: insertedMessage, error: messageInsertError } = await supabase
       .from('messages')
-      .insert({ chat_id: actualChatId, user_id: userId, role: 'user', content, created_at: now });
+      .insert({ chat_id: actualChatId, user_id: userId, role: 'user', content: actualContent, created_at: now })
+      .select('id')
+      .single();
+    
     if (messageInsertError) {
       return NextResponse.json({ error: `Failed to save message: ${messageInsertError.message}` }, { status: 400 });
     }
+    
+    const userMessageId = insertedMessage?.id;
+    
+    // Get file attachments content for this message
+    let fileContent = '';
+    
+    // Link attachments to this message if provided
+    if (attachmentIds && Array.isArray(attachmentIds) && attachmentIds.length > 0 && userMessageId) {
+      console.log('[CHAT SEND] Linking attachments:', attachmentIds, 'to message:', userMessageId);
+      const { error: updateError } = await supabase
+        .from('attachments')
+        .update({ message_id: userMessageId })
+        .in('id', attachmentIds)
+        .eq('user_id', userId);
+      
+      if (updateError) {
+        console.error('[CHAT SEND] Error linking attachments to message:', updateError);
+      }
+      
+      // Wait for file processing to complete (with retries)
+      // Some files might still be processing
+      let retries = 0;
+      const maxRetries = 10; // Try for up to 5 seconds (10 * 500ms)
+      
+      while (retries < maxRetries) {
+        // Try to get attachments by attachment IDs (more reliable than message_id immediately after update)
+        const { data: attachments, error: attachError } = await supabase
+          .from('attachments')
+          .select('id, file_name, extracted_text, message_id')
+          .in('id', attachmentIds)
+          .eq('user_id', userId);
+        
+        console.log(`[CHAT SEND] Retry ${retries + 1}/${maxRetries}: Found ${attachments?.length || 0} attachments`);
+        
+        if (!attachError && attachments && attachments.length > 0) {
+          // Log raw extracted_text lengths for debugging
+          attachments.forEach((att: any) => {
+            console.log(`[CHAT SEND] Attachment ${att.file_name}: extracted_text length = ${att.extracted_text?.length || 0}, type = ${typeof att.extracted_text}`);
+          });
+          
+          // Check if all files are processed (have extracted_text or error)
+          const processed = attachments.filter(att => 
+            att.extracted_text !== null && 
+            att.extracted_text !== undefined &&
+            (att.extracted_text.trim().length > 0 || 
+             att.extracted_text.includes('[File processing failed:') ||
+             att.extracted_text.includes('Failed to extract'))
+          );
+          
+          console.log(`[CHAT SEND] Processed: ${processed.length}/${attachments.length} files`);
+          
+          if (processed.length === attachments.length && processed.length > 0) {
+            // All files processed, build content
+            for (const att of processed) {
+              console.log(`[CHAT SEND] Building content for attachment: ${att.file_name}, extracted_text length: ${att.extracted_text?.length || 0}`);
+              if (att.extracted_text && att.extracted_text.trim()) {
+                if (att.extracted_text.includes('[File processing failed:') || 
+                    att.extracted_text.includes('Failed to extract')) {
+                  fileContent += `\n\n[File: ${att.file_name} - Unable to extract text content. The file may be image-based, encrypted, or in an unsupported format.]\n`;
+                } else {
+                  const textToAdd = att.extracted_text;
+                  console.log(`[CHAT SEND] Adding ${textToAdd.length} characters from ${att.file_name}`);
+                  fileContent += `\n\n[File: ${att.file_name}]\n${textToAdd}\n`;
+                }
+              }
+            }
+            console.log('[CHAT SEND] Successfully retrieved file content, total length:', fileContent.length);
+            break;
+          }
+        }
+        
+        // Wait 500ms before retrying
+        await new Promise(resolve => setTimeout(resolve, 500));
+        retries++;
+      }
+      
+      // If still no content after retries, use the original function as fallback
+      if (!fileContent) {
+        console.log('[CHAT SEND] Retries exhausted, trying fallback method');
+        fileContent = await getAttachmentsWithText(supabase, userId, userMessageId);
+      }
+    } else if (userMessageId) {
+      // No attachmentIds provided, but check if message has any attachments
+      fileContent = await getAttachmentsWithText(supabase, userId, userMessageId);
+    }
+    
+    // Build the final content with file attachments
+    const finalContent = actualContent + fileContent;
+    console.log('[CHAT SEND] Final content length (message + files):', finalContent.length);
 
     // 4: Load teacher system prompt if chat is associated with a teacher
     let teacherSystemPrompt = '';
@@ -305,7 +463,7 @@ export async function POST(req: Request) {
             messages: (
               systemMessages
               .concat(messagesForAI.map((m: any) => ({ role: m.role, content: m.content })))
-              .concat([{ role: 'user', content }])
+              .concat([{ role: 'user', content: finalContent }])
             ),
             max_tokens: 512,
             temperature: 0.7,
@@ -381,18 +539,48 @@ export async function POST(req: Request) {
 
           // After streaming completes, save to DB and do post-processing
           try {
+            // DEBUG: Log server-side content before DB insert (point 1)
+            const hasMatrix = /\\begin\{[^}]+\}[\s\S]*?\\end\{[^}]+\}/.test(fullAnswer);
+            if (hasMatrix) {
+              const snippet = fullAnswer.slice(0, 200).replace(/\n/g, '\\n');
+              const backslashCount = (fullAnswer.match(/\\\\/g) || []).length;
+              console.log('[DEBUG POINT 1] Server received fullAnswer snippet:', JSON.stringify(snippet));
+              console.log('[DEBUG POINT 1] Count of \\\\ sequences:', backslashCount);
+              console.log('[DEBUG POINT 1] Full length:', fullAnswer.length);
+            }
+            
             // 7: Insert AI response
             const { error: aiMessageError } = await supabase
               .from('messages')
               .insert({ chat_id: actualChatId, user_id: userId, role: 'assistant', content: fullAnswer, created_at: new Date().toISOString() });
             if (aiMessageError) {
               console.error('Failed to save AI response:', aiMessageError);
+            } else {
+              // DEBUG: Log after DB insert (point 2) - verify what was saved
+              const hasMatrix = /\\begin\{[^}]+\}[\s\S]*?\\end\{[^}]+\}/.test(fullAnswer);
+              if (hasMatrix) {
+                const { data: savedMsg } = await supabase
+                  .from('messages')
+                  .select('content')
+                  .eq('chat_id', actualChatId)
+                  .eq('user_id', userId)
+                  .eq('role', 'assistant')
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .single();
+                if (savedMsg) {
+                  const snippet = savedMsg.content.slice(0, 200).replace(/\n/g, '\\n');
+                  const backslashCount = (savedMsg.content.match(/\\\\/g) || []).length;
+                  console.log('[DEBUG POINT 2] After DB insert - saved content snippet:', JSON.stringify(snippet));
+                  console.log('[DEBUG POINT 2] Count of \\\\ sequences:', backslashCount);
+                }
+              }
             }
             
             // 7b: Generate and update chat title for new chats
-            if (isNewChat && content.trim()) {
+            if (isNewChat && actualContent.trim()) {
               try {
-                const generatedTitle = await generateChatTitle(content);
+                const generatedTitle = await generateChatTitle(actualContent);
                 await supabase
                   .from('chats')
                   .update({ title: generatedTitle })

@@ -17,6 +17,8 @@ import { UserConductPolicyPage } from "./components/UserConductPolicyPage";
 import { DMCATakedownPolicyPage } from "./components/DMCATakedownPolicyPage";
 import { LiabilityDisclaimerPage } from "./components/LiabilityDisclaimerPage";
 import { ContactSupportPage } from "./components/ContactSupportPage";
+import { PricingPage } from "./components/PricingPage";
+import { AccountDeleteFeedbackPage } from "./components/AccountDeleteFeedbackPage";
 import { toast, Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 
@@ -26,7 +28,7 @@ function MainApp() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("general");
+  const [activeTab, setActiveTab] = useState("personalization");
   const [activeChat, setActiveChat] = useState("new-chat");
   const [activeAtlasChat, setActiveAtlasChat] = useState("new-chat");
   const [activeTeacherId, setActiveTeacherId] = useState<string | null>(null);
@@ -116,6 +118,44 @@ function MainApp() {
           }}
         />
         <ContactSupportPage />
+      </>
+    );
+  }
+
+  // If on /pricing route, show pricing page
+  if (currentPath === '/pricing') {
+    return (
+      <>
+        <Toaster 
+          position="top-center"
+          toastOptions={{
+            style: {
+              background: 'var(--card-bg)',
+              border: '1px solid var(--card-border)',
+              color: 'var(--text-primary)',
+            },
+          }}
+        />
+        <PricingPage />
+      </>
+    );
+  }
+
+  // If on /account/delete-feedback route, show account deletion feedback page
+  if (currentPath === '/account/delete-feedback') {
+    return (
+      <>
+        <Toaster 
+          position="top-center"
+          toastOptions={{
+            style: {
+              background: 'var(--card-bg)',
+              border: '1px solid var(--card-border)',
+              color: 'var(--text-primary)',
+            },
+          }}
+        />
+        <AccountDeleteFeedbackPage />
       </>
     );
   }
@@ -315,7 +355,7 @@ function MainApp() {
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
         onOpenSettings={() => {
-          setActiveTab("general");
+          setActiveTab("personalization");
           setSettingsOpen(true);
         }}
         onOpenPersonalization={handleOpenPersonalization}

@@ -50,15 +50,13 @@ export function isNSFWQuery(query: string): boolean {
 }
 
 /**
- * Get Exa API exclude_text array for NSFW filtering
+ * Get Exa API exclude_text for NSFW filtering
+ * Exa API constraint: excludeText must be an array containing up to 1 phrase, each up to 5 words
+ * Returns an array with a single string element (up to 5 words)
  */
 export function getNSFWExcludeText(): string[] {
-  return [
-    'nsfw', 'adult', 'xxx', 'porn', 'explicit', 'sexual', 'nude', 'nudity',
-    'pornography', 'erotic', 'lewd', 'obscene', 'gore', 'violence', 'brutal',
-    // Add hentai and anime adult terms
-    'hentai', 'ecchi', 'doujin', 'doujinshi', 'rule 34', 'r34', 'rule34'
-  ];
+  // Return an array with a single phrase (up to 5 words) that covers the most NSFW content
+  return ['nsfw adult explicit content'];
 }
 
 /**
