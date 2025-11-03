@@ -73,6 +73,8 @@
             "dev:frontend": "vite",
             "dev:backend": "next dev -p 3000",
             "dev": "npm-run-all --parallel dev:backend dev:frontend",
-            "build": "vite build"
+            "build:frontend": "vite build",
+            "build:backend": "next build"
       }
+
 }
